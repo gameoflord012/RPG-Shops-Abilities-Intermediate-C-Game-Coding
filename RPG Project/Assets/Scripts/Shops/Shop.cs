@@ -10,31 +10,86 @@ namespace RPG.Shops
     public class Shop : MonoBehaviour, IRaycastable
     {
         [SerializeField] string shopName;
+        [SerializeField] StockItemConfig[] stockConfigs;
+
+        Shopper currentShopper;
+
+        [System.Serializable]
+        class StockItemConfig
+        {
+            public InventoryItem item;
+            public int initialStock;
+            [Range(0, 100)]
+            public float buyingDiscount;
+        }
+
+        Dictionary<InventoryItem, int> transaction = new Dictionary<InventoryItem, int>();
 
         public event Action onChange;
 
         public IEnumerable<ShopItem> GetFilteredItems() 
         {
-            yield return new ShopItem(
-                InventoryItem.GetFromID("e75a0c32-d41c-4651-8496-92cb958a8f1e"),
-                10, 10, 0);
-
-            yield return new ShopItem(
-                InventoryItem.GetFromID("dbc1e40e-d3bd-4e26-a62b-6cff0e46c415"),
-                10, 10, 0);
-
-            yield return new ShopItem(
-                InventoryItem.GetFromID("7d90a7e3-231b-4bfc-8a0f-c74c77bfe2c4"),
-                10, 10, 0);
+            foreach (var stockConfig in stockConfigs)
+            {
+                var calculatedPrice = (1 - stockConfig.buyingDiscount / 100) * stockConfig.item.GetPrice();
+                int transactionQuantity = 0;
+                transaction.TryGetValue(stockConfig.item, out transactionQuantity);
+                yield return new ShopItem(stockConfig.item, stockConfig.initialStock, calculatedPrice, transactionQuantity);
+            }
         }
+
         public void SelectFilter(ItemCategory category) {}
         public ItemCategory GetFilter() { return ItemCategory.None; }
         public void SelectMode(bool isBuying) {}
         public bool IsBuyingMode() { return true; }
         public bool CanTransact() { return true; }
-        public void ConfirmTransaction() {}
+
+        public void SetShopper(Shopper shopper)
+        {
+            currentShopper = shopper;
+        }
+
+        public void ConfirmTransaction() 
+        {
+            Inventory shopperInventory = currentShopper.GetComponent<Inventory>();
+            if (shopperInventory == null) return;
+
+            var transatctionSnapshot = new Dictionary<InventoryItem, int>(transaction);
+            foreach(var item in transatctionSnapshot.Keys)
+            {
+                var quantity = transatctionSnapshot[item];
+
+                for(int i = 0; i < quantity; i++)
+                {
+                    if (shopperInventory.AddToFirstEmptySlot(item, 1))
+                    {
+                        AddToTransaction(item, -1);
+                    }
+                }
+            }
+
+            onChange?.Invoke();
+        }
+
         public float TransactionTotal() { return 0; }
-        public void AddToTransaction(InventoryItem item, int quantity) {}
+
+        public void AddToTransaction(InventoryItem item, int quantity) 
+        {
+            // Debug.Log($"Added to transaction: {item.GetDisplayName()} x {quantity}");
+            if(!transaction.ContainsKey(item))
+            {
+                transaction.Add(item, 0);
+            }
+
+            transaction[item] += quantity;
+
+            if(transaction[item] <= 0)
+            {
+                transaction.Remove(item);
+            }
+
+            onChange?.Invoke();
+        }
 
         public string GetShopName()
         {
